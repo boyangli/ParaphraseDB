@@ -1,7 +1,7 @@
 package main
 import java.util.zip._
 import java.io._
-import java.util._
+import java.util.Scanner
 
 object Main {
 
@@ -11,32 +11,53 @@ object Main {
   }
 
   def main(args: Array[String]) {
-    import com.sleepycat.je._
-    val inputStream = new GZIPInputStream(new FileInputStream("""d:\code\ppdb-1.0-s-ccg.gz"""))
-    //val pw = new PrintWriter(new GZIPOutputStream(new FileOutputStream("""d:\code\ppdb-1.0-xl-all-small.gz""")))
-    val scanner = new Scanner(inputStream)
-
-    //    var count = 0
-    //    while (scanner.hasNextLine() && count < 1) {
-    //      println(scanner.nextLine())
-    //      count += 1
-    //    }
-
-    val rules = Loader.load("""d:\code\ppdb-1.0-s-ccg.gz""", 1)
+    import com.sleepycat.db._
 
     val db = new BerkeleyDB()
-//    for (r <- rules) {
-//      println(r.toFullString)
-//
-//      println("**")
-//      db.put(r)
-//    }
+    val loader = new Loader("""../../ppdb-1.0-xxxl-all.gz""")
 
-    for (r <- rules) {
-      
-      val rule = db.get(r.source)
-      println("from db: " + r.toFullString)
-    }
+    var list: List[Rule] = Nil
+
+    do {
+      val time = System.currentTimeMillis()
+      list = loader.loadBatch(50000)
+
+      list foreach
+        {
+          rule =>
+            db.putBothEnd(rule)
+        }
+
+      println(list.head)
+
+      db.sync
+      loader.printStats
+      val nextTime = System.currentTimeMillis()
+      println("time = " + (nextTime - time) / 1000.0)
+    } while (list != Nil)
+
+    db.close
+
+    //    for (r <- rules) {
+    //      println(r.toFullString)
+
+    //            println("**")
+    //      db.put(r)
+    //    }
+
+    //    val results = db.getAll("webdgspn")
+    //
+    //    println("retrieved " + results.size)
+    //
+    //    println("from db: " + results.map(_.toFullString).mkString("\n"))
+    //    }
+    //    val secs = (System.currentTimeMillis() - time).toDouble / 10000 / 1000
+    //    println("seconds = " + secs)
+    //    for (r <- rules) {
+    //      
+    //      val rule = db.get(r.source)
+    //      println("from db: " + rule.get.toFullString)
+    //    }
   }
 
   def abbreviate(scanner: Scanner, pw: PrintWriter) {

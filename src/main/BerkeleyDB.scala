@@ -1,6 +1,6 @@
 package main
 
-import com.sleepycat.je._
+import com.sleepycat.db._
 import com.sleepycat.bind.tuple.TupleBinding
 import com.sleepycat.bind.tuple.TupleInput
 import com.sleepycat.bind.tuple.TupleOutput
@@ -19,29 +19,52 @@ class BerkeleyDB {
    *  See http://stackoverflow.com/questions/4674674/cannot-change-berkeley-db-database-type-in-java-edition
    */
   def setup() {
-    val home = new File("./data/PPDB")
-    
+    val home = new File("""H:\Albert\PPDB-BerkeleyDB\""")
+    //val home = new File("""./data/PPDB""")
     val envConfig = new EnvironmentConfig()
     val dbConfig = new DatabaseConfig()
     envConfig.setAllowCreate(true)
     dbConfig.setAllowCreate(true)
-    
-    envConfig.setTransactional(true)
-    dbConfig.setTransactional(true)   
-    
+
+    dbConfig.setType(DatabaseType.HASH)
+
+    envConfig.setTransactional(false)
+    dbConfig.setTransactional(false)
+
+    dbConfig.setUnsortedDuplicates(true)
+
+    envConfig.setInitializeCache(true);
+    envConfig.setInitializeLocking(true);
+    //envConfig.setCacheSize(1048576)
     env = new Environment(home, envConfig)
-    
-    
-    ppdb = env.openDatabase(null, "sampleDatabase.db",
-      dbConfig);
+
+    //println("cache size =" + env.getConfig().getCacheSize())
+    ppdb = env.openDatabase(null, "paraphraseDB.db", "paraphraseDB", dbConfig)
+    //ppdb = new Database("./data/PPDB/paraphraseDB.db", "paraphraseDB", dbConfig);
+
   }
 
-  def put(rule: Rule) {
+  def sync() {
+    ppdb.sync()
+  }
+
+  def putBothEnd(rule: Rule) {
     var theKey = new DatabaseEntry(rule.source.getBytes(java.nio.charset.Charset.forName("UTF-8")))
     val theData = new DatabaseEntry()
     val binding = new RuleBinding()
-    binding.objectToEntry(rule, theData);
-    ppdb.put(null, theKey, theData);
+    binding.objectToEntry(rule, theData)
+    ppdb.put(null, theKey, theData)
+
+    theKey = new DatabaseEntry(rule.target.getBytes(java.nio.charset.Charset.forName("UTF-8")))
+    ppdb.put(null, theKey, theData)
+  }
+
+  def putSingle(key: String, rule: Rule) {
+    var theKey = new DatabaseEntry(key.getBytes(java.nio.charset.Charset.forName("UTF-8")))
+    val theData = new DatabaseEntry()
+    val binding = new RuleBinding()
+    binding.objectToEntry(rule, theData)
+    ppdb.put(null, theKey, theData)
   }
 
   def get(key: String): Option[Rule] =
@@ -51,6 +74,7 @@ class BerkeleyDB {
       var rule: Rule = null
       if (ppdb.get(null, theKey, theData, LockMode.DEFAULT) ==
         OperationStatus.SUCCESS) {
+
         // Recreate the data String.
         val binding = new RuleBinding()
         rule = binding.entryToObject(theData)
@@ -59,6 +83,33 @@ class BerkeleyDB {
         None
       }
 
+    }
+
+  def getAll(key: String): List[Rule] =
+    {
+
+      val keyString = key.trim
+      val cursorConfig = new CursorConfig()
+      cursorConfig.setReadUncommitted(true)
+      val cursor = ppdb.openCursor(null, cursorConfig)
+      val results = scala.collection.mutable.ListBuffer[Rule]()
+
+      var theKey = new DatabaseEntry(keyString.getBytes(java.nio.charset.Charset.forName("UTF-8")))
+      val theData = new DatabaseEntry()
+      var rule: Rule = null
+
+      var retVal = cursor.getSearchKey(theKey, theData,
+        LockMode.DEFAULT);
+      // Count the number of duplicates. If the count is greater than 1,
+      // print the duplicates.
+      while (retVal == OperationStatus.SUCCESS) {
+        val binding = new RuleBinding()
+        rule = binding.entryToObject(theData)
+        results += rule
+        retVal = cursor.getNextDup(theKey, theData, LockMode.DEFAULT);
+      }
+
+      results.toList
     }
 
   def close() {

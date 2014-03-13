@@ -6,28 +6,189 @@ import java.util.Scanner
 import scala.collection.mutable.ListBuffer
 import java.text.DecimalFormat
 
-object Loader {
+class Loader(filename: String) {
 
-  def load(filename: String, number: Int): List[Rule] =
+  private var inputStream = new GZIPInputStream(new FileInputStream(filename))
+  private var scanner = new Scanner(inputStream)
+
+  private var count = 0
+  private var duplicates = 0
+  private var lineCount = 1
+  private var tenK = 1
+  private var line1: String = null
+  private var rule1: Rule = null
+  /**
+   * load a number of rule from the gz file
+   * if the number is less than zero, load every rule
+   */
+  def load(filename: String, limit: Int): List[Rule] =
     {
-      val inputStream = new GZIPInputStream(new FileInputStream("""d:\code\ppdb-1.0-s-ccg.gz"""))
-      val scanner = new Scanner(inputStream)
       val list = ListBuffer[Rule]()
-
-      var count = 0
-      while (scanner.hasNextLine() && count < number) {
-
-        val line = scanner.nextLine()
-        val rule = Rule(line)
+      def func(rule: Rule) {
         list += rule
-        if (number > 0 && count > number) {
-          return list.toList
-        }
-        count += 1
       }
 
+      loadAndExec(filename, limit, func)
       list.toList
     }
+
+  def printStats() {
+    println("# duplicates = " + duplicates)
+    println("# lines = " + lineCount)
+    println("# valid rules = " + count)
+  }
+
+  /**
+   * load a number of rule from the gz file
+   * if the number is less than zero, load every rule
+   */
+  def loadBatch(limit: Int): List[Rule] = {
+
+    var list = List[Rule]()
+    var i = 0
+
+    if (line1 == null) {
+      if (scanner.hasNextLine()) {
+        line1 = scanner.nextLine()
+        rule1 = Rule(line1)
+      } else {
+        return list
+      }
+    }
+
+    while (scanner.hasNextLine()) {
+
+      val line2 = scanner.nextLine()
+      val rule2 = Rule(line2)
+      lineCount += 1
+
+      if (rule1.lhs == rule2.lhs && rule1.source == rule2.target && rule1.source == rule2.target) {
+        // duplicates detected
+        duplicates += 1
+
+        if (isValid(rule1)) {
+          list = rule1 :: list
+          count += 1
+          i += 1
+        }
+
+        if (scanner.hasNextLine()) {
+          line1 = scanner.nextLine()
+          rule1 = Rule(line1)
+          lineCount += 1
+        } else {
+
+          return list
+        }
+
+      } else {
+        // outputs one
+        if (isValid(rule1)) {
+          list = rule1 :: list
+          count += 1
+          i += 1
+        }
+        rule1 = rule2
+      }
+
+      if (i >= limit) {
+        return list
+      }
+    }
+
+    list
+  }
+
+  /**
+   * load a number of rule from the gz file
+   * if the number is less than zero, load every rule
+   */
+  def loadAndExec(filename: String, limit: Int, func: Rule => Unit) {
+
+    var count = 0
+    var duplicates = 0
+    var lineCount = 1
+    var tenK = 1
+    var line1 = scanner.nextLine()
+    var rule1 = Rule(line1)
+
+    while (scanner.hasNextLine()) {
+
+      if (lineCount >= tenK * 10000) {
+        println("processed " + lineCount + " lines.")
+        tenK += 1
+      }
+
+      val line2 = scanner.nextLine()
+      val rule2 = Rule(line2)
+      lineCount += 1
+
+      if (rule1.lhs == rule2.lhs && rule1.source == rule2.target && rule1.source == rule2.target) {
+        // duplicates detected
+        duplicates += 1
+
+        if (isValid(rule1)) {
+          func(rule1)
+          count += 1
+        }
+
+        if (scanner.hasNextLine()) {
+          line1 = scanner.nextLine()
+          rule1 = Rule(line1)
+          lineCount += 1
+        } else {
+          println("# duplicates = " + duplicates)
+          println("# lines = " + lineCount)
+          println("# valid rules = " + count)
+          return
+        }
+
+      } else {
+        // outputs one
+        if (isValid(rule1)) {
+          func(rule1)
+          count += 1
+        }
+        rule1 = rule2
+      }
+
+      if (limit > 0 && count >= limit) {
+        println("# duplicates = " + duplicates)
+        println("# lines = " + lineCount)
+        println("# valid rules = " + count)
+        return
+      }
+    }
+
+    println("# duplicates = " + duplicates)
+    println("# lines = " + lineCount)
+    println("# valid rules = " + count)
+  }
+
+  /**
+   * a valid rule must contain characters other than numbers and punctuation symbols
+   *
+   */
+  def isValid(rule: Rule): Boolean =
+    {
+      def isLetter(char: Char) = (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
+
+      {
+        // either the source or the target must contain letters
+        rule.source.exists(isLetter) || rule.target.exists(isLetter)
+      } && {
+        // must not end with ".html"
+        (!rule.source.endsWith(".html")) && (!rule.target.endsWith(".html"))
+      } && {
+        // must not start with "www" and ends with ".com"
+        (!((rule.source.endsWith(".com") || rule.source.endsWith(".org") || rule.source.endsWith(".gov")) && rule.source.startsWith("www."))) && 
+        (!((rule.target.endsWith(".com") || rule.target.endsWith(".org") || rule.target.endsWith(".gov")) && rule.target.startsWith("www.")))
+      } && {
+        // not email addresses
+        ! (rule.source.contains("@") || rule.target.contains("@")) 
+      }
+    }
+
 }
 
 class Rule(val lhs: String, val source: String, val target: String, val Abstract: Boolean, val Adjacent: Boolean,
@@ -57,8 +218,8 @@ class Rule(val lhs: String, val source: String, val target: String, val Abstract
       builder.append(" ContainsX=" + Rule.toZeroOne(ContainsX))
       builder.append(" Lex(e|f)=" + df.format(Lex_ef))
       builder.append(" Lex(f|e)=" + df.format(Lex_fe))
-      builder.append(" Lexical=" + Lexical)
-      builder.append(" Lexical=" + Rule.toZeroOne(Monotonic))
+      builder.append(" Lexical=" + Rule.toZeroOne(Lexical))
+      builder.append(" Monotonic=" + Rule.toZeroOne(Monotonic))
       builder.append(" UnalignedSource=" + UnalignedSource)
       builder.append(" UnalignedTarget=" + UnalignedTarget)
       builder.append(" p(LHS|e)=" + df.format(p_LHS1e))
@@ -127,7 +288,5 @@ object Rule {
         p_f1e_LHS, AGigaSim, GoogleNgramSim, alignment)
 
     }
-  
-  
 
 }
